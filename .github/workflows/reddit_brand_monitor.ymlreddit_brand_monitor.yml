@@ -1,0 +1,39 @@
+name: Reddit Brand Monitor
+
+on:
+  schedule:
+    - cron: '0 14 * * 1-5'
+    - cron: '0 15 * * 0,6'
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: 'How many days back to search (default: 1)'
+        required: false
+        default: '1'
+        type: string
+
+jobs:
+  reddit-monitor:
+    name: Scan r/MissouriMedical for Brand Mentions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install requests anthropic
+
+      - name: Run brand monitor
+        env:
+          SLACK_WEBHOOK_URL:  ${{ secrets.SLACK_WEBHOOK_URL }}
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          LOOKBACK_DAYS:      ${{ github.event.inputs.lookback_days || '1' }}
+        run: python reddit_brand_monitor.py
