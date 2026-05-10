@@ -58,7 +58,9 @@ def _rss_entries_to_items(entries, item_type):
         link = (link_el.get("href") or "") if link_el is not None else ""
         title = entry.findtext(f"{{{ATOM}}}title") or ""
         content = entry.findtext(f"{{{ATOM}}}content") or ""
-        uid = (entry.findtext(f"{{{ATOM}}}id") or link).rstrip("/").rsplit("/", 2)[-2] if link else ""
+        raw_id = (entry.findtext(f"{{{ATOM}}}id") or link or "").rstrip("/")
+        parts = raw_id.rsplit("/")
+        uid = parts[-2] if len(parts) >= 2 else (parts[0] if parts else "")
         field = "selftext" if item_type == "post" else "body"
         items.append({"data": {
             "id": uid, "title": title if item_type == "post" else "",
