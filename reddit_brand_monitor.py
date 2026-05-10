@@ -30,52 +30,59 @@ BRAND_TERMS = {
     "Curador":    ["curador", "curador brands", "curador labs", "curador holdings"],
 }
 
-def _reddit_get(path, params=None):
-    headers = {"User-Agent": USER_AGENT}
-    resp = requests.get(f"{BASE_URL}{path}", params=params, headers=headers, timeout=15)
+import xml.etree.ElementTree as ET
+
+def _parse_rss_date(s):
+    for fmt in ("%Y-%m-%dT%H:%M:%S+00:00", "%Y-%m-%dT%H:%M:%SZ"):
+        try:
+            return datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc)
+
+def _fetch_rss(url):
+    resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=15)
     resp.raise_for_status()
     time.sleep(0.6)
-    return resp.json()
+    return ET.fromstring(resp.content)
+
+def _rss_entries_to_items(entries, item_type):
+    items = []
+    ATOM = "http://www.w3.org/2005/Atom"
+    for entry in entries:
+        updated = entry.findtext(f"{{{ATOM}}}updated") or ""
+        dt = _parse_rss_date(updated)
+        author_el = entry.find(f"{{{ATOM}}}author")
+        author = (author_el.findtext(f"{{{ATOM}}}name") or "[deleted]").replace("/u/", "") if author_el is not None else "[deleted]"
+        link_el = entry.find(f"{{{ATOM}}}link")
+        link = (link_el.get("href") or "") if link_el is not None else ""
+        title = entry.findtext(f"{{{ATOM}}}title") or ""
+        content = entry.findtext(f"{{{ATOM}}}content") or ""
+        uid = (entry.findtext(f"{{{ATOM}}}id") or link).rstrip("/").rsplit("/", 2)[-2] if link else ""
+        field = "selftext" if item_type == "post" else "body"
+        items.append({"data": {
+            "id": uid, "title": title if item_type == "post" else "",
+            field: content, "author": author,
+            "permalink": link.replace("https://www.reddit.com", ""),
+            "created_utc": dt.timestamp(), "score": 0,
+        }})
+    return items
 
 def get_recent_posts(lookback_days, max_posts=500):
-    posts, after = [], None
-    cutoff_ts = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).timestamp()
-    while len(posts) < max_posts:
-        params = {"limit": 100}
-        if after:
-            params["after"] = after
-        data = _reddit_get(f"/r/{SUBREDDIT}/new.json", params)
-        children = data.get("data", {}).get("children", [])
-        if not children:
-            break
-        oldest = children[-1]["data"].get("created_utc", 0)
-        posts.extend(children)
-        if oldest < cutoff_ts:
-            break
-        after = data.get("data", {}).get("after")
-        if not after:
-            break
-    return posts
+    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    root = _fetch_rss(f"{BASE_URL}/r/{SUBREDDIT}/new.rss?limit=100")
+    ATOM = "http://www.w3.org/2005/Atom"
+    entries = root.findall(f".//{{{ATOM}}}entry")
+    items = _rss_entries_to_items(entries, "post")
+    return [i for i in items if datetime.fromtimestamp(i["data"]["created_utc"], tz=timezone.utc) >= cutoff]
 
 def get_recent_comments(lookback_days, max_comments=500):
-    comments, after = [], None
-    cutoff_ts = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).timestamp()
-    while len(comments) < max_comments:
-        params = {"limit": 100}
-        if after:
-            params["after"] = after
-        data = _reddit_get(f"/r/{SUBREDDIT}/comments.json", params)
-        children = data.get("data", {}).get("children", [])
-        if not children:
-            break
-        oldest = children[-1]["data"].get("created_utc", 0)
-        comments.extend(children)
-        if oldest < cutoff_ts:
-            break
-        after = data.get("data", {}).get("after")
-        if not after:
-            break
-    return comments
+    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    root = _fetch_rss(f"{BASE_URL}/r/{SUBREDDIT}/comments.rss?limit=100")
+    ATOM = "http://www.w3.org/2005/Atom"
+    entries = root.findall(f".//{{{ATOM}}}entry")
+    items = _rss_entries_to_items(entries, "comment")
+    return [i for i in items if datetime.fromtimestamp(i["data"]["created_utc"], tz=timezone.utc) >= cutoff]
 
 def find_mentions(posts, comments, lookback_days):
     cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
