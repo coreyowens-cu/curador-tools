@@ -9,8 +9,6 @@ and posts a formatted report to Slack #ai-reddit-brand-mentions.
 Environment variables required:
   SLACK_WEBHOOK_URL     — Slack incoming webhook URL
   ANTHROPIC_API_KEY     — Anthropic API key (for categorization + response drafts)
-  REDDIT_CLIENT_ID      — Reddit app client ID (from reddit.com/prefs/apps)
-  REDDIT_CLIENT_SECRET  — Reddit app client secret
   LOOKBACK_DAYS         — (optional) days to look back; defaults to 1
 """
 
@@ -20,10 +18,9 @@ import time
 import requests
 from datetime import datetime, timedelta, timezone
 
-SUBREDDIT    = "MissouriMedical"
-REDDIT_BASE  = "https://oauth.reddit.com"
-TOKEN_URL    = "https://www.reddit.com/api/v1/access_token"
-USER_AGENT   = "script:CuradorBrandMonitor:v1.0 (by /u/curadorbrands)"
+SUBREDDIT  = "MissouriMedical"
+BASE_URL   = "https://www.reddit.com"
+USER_AGENT = "script:CuradorBrandMonitor:v1.1 (by /u/curadorbrands)"
 
 BRAND_TERMS = {
     "HeadChange": ["head change", "headchange"],
@@ -33,42 +30,27 @@ BRAND_TERMS = {
     "Curador":    ["curador", "curador brands", "curador labs", "curador holdings"],
 }
 
-def get_reddit_token():
-    client_id     = os.environ["REDDIT_CLIENT_ID"]
-    client_secret = os.environ["REDDIT_CLIENT_SECRET"]
-    resp = requests.post(
-        TOKEN_URL,
-        data={"grant_type": "client_credentials"},
-        auth=(client_id, client_secret),
-        headers={"User-Agent": USER_AGENT},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    token = resp.json()["access_token"]
-    print("  Reddit OAuth token obtained.")
-    return token
-
-def _reddit_get(token, path, params=None):
-    headers = {"Authorization": f"bearer {token}", "User-Agent": USER_AGENT}
-    resp = requests.get(f"{REDDIT_BASE}{path}", params=params, headers=headers, timeout=15)
+def _reddit_get(path, params=None):
+    headers = {"User-Agent": USER_AGENT}
+    resp = requests.get(f"{BASE_URL}{path}", params=params, headers=headers, timeout=15)
     resp.raise_for_status()
     time.sleep(0.6)
     return resp.json()
 
-def search_posts(token, term, lookback_days):
+def search_posts(term, lookback_days):
     time_filter = "day" if lookback_days <= 1 else "week" if lookback_days <= 7 else "month"
-    data = _reddit_get(token, f"/r/{SUBREDDIT}/search",
+    data = _reddit_get(f"/r/{SUBREDDIT}/search.json",
         params={"q": term, "restrict_sr": "1", "sort": "new", "t": time_filter, "limit": 100})
     return data.get("data", {}).get("children", [])
 
-def get_recent_comments(token, lookback_days, max_comments=500):
+def get_recent_comments(lookback_days, max_comments=500):
     comments, after = [], None
     cutoff_ts = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).timestamp()
     while len(comments) < max_comments:
         params = {"limit": 100}
         if after:
             params["after"] = after
-        data = _reddit_get(token, f"/r/{SUBREDDIT}/comments", params)
+        data = _reddit_get(f"/r/{SUBREDDIT}/comments.json", params)
         children = data.get("data", {}).get("children", [])
         if not children:
             break
@@ -185,17 +167,15 @@ def main():
     date_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
     print(f"=== Curador Reddit Brand Monitor — {date_str} ===")
     print(f"Lookback: {lookback_days} day(s) | Subreddit: r/{SUBREDDIT}")
-    print("\nAuthenticating with Reddit OAuth…")
-    token = get_reddit_token()
     print("\n[1/4] Searching posts…")
     all_posts = []
     for brand, terms in BRAND_TERMS.items():
         for term in terms:
             print(f"  Searching: {term}")
-            all_posts.extend(search_posts(token, term, lookback_days))
+            all_posts.extend(search_posts(term, lookback_days))
     print(f"  → {len(all_posts)} raw post result(s)")
     print("\n[2/4] Fetching recent comments…")
-    comments = get_recent_comments(token, lookback_days, max_comments=500)
+    comments = get_recent_comments(lookback_days, max_comments=500)
     print(f"  → {len(comments)} comment(s) fetched")
     print("\n[3/4] Scanning for brand mentions…")
     mentions = find_mentions(all_posts, comments, lookback_days)
