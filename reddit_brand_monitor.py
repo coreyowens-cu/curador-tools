@@ -37,11 +37,25 @@ def _reddit_get(path, params=None):
     time.sleep(0.6)
     return resp.json()
 
-def search_posts(term, lookback_days):
-    time_filter = "day" if lookback_days <= 1 else "week" if lookback_days <= 7 else "month"
-    data = _reddit_get(f"/r/{SUBREDDIT}/search.json",
-        params={"q": term, "restrict_sr": "1", "sort": "new", "t": time_filter, "limit": 100})
-    return data.get("data", {}).get("children", [])
+def get_recent_posts(lookback_days, max_posts=500):
+    posts, after = [], None
+    cutoff_ts = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).timestamp()
+    while len(posts) < max_posts:
+        params = {"limit": 100}
+        if after:
+            params["after"] = after
+        data = _reddit_get(f"/r/{SUBREDDIT}/new.json", params)
+        children = data.get("data", {}).get("children", [])
+        if not children:
+            break
+        oldest = children[-1]["data"].get("created_utc", 0)
+        posts.extend(children)
+        if oldest < cutoff_ts:
+            break
+        after = data.get("data", {}).get("after")
+        if not after:
+            break
+    return posts
 
 def get_recent_comments(lookback_days, max_comments=500):
     comments, after = [], None
@@ -167,13 +181,9 @@ def main():
     date_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
     print(f"=== Curador Reddit Brand Monitor — {date_str} ===")
     print(f"Lookback: {lookback_days} day(s) | Subreddit: r/{SUBREDDIT}")
-    print("\n[1/4] Searching posts…")
-    all_posts = []
-    for brand, terms in BRAND_TERMS.items():
-        for term in terms:
-            print(f"  Searching: {term}")
-            all_posts.extend(search_posts(term, lookback_days))
-    print(f"  → {len(all_posts)} raw post result(s)")
+    print("\n[1/4] Fetching recent posts…")
+    all_posts = get_recent_posts(lookback_days, max_posts=500)
+    print(f"  → {len(all_posts)} post(s) fetched")
     print("\n[2/4] Fetching recent comments…")
     comments = get_recent_comments(lookback_days, max_comments=500)
     print(f"  → {len(comments)} comment(s) fetched")
