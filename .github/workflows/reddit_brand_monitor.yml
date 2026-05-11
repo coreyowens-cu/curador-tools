@@ -1,9 +1,6 @@
 name: Reddit Brand Monitor
 
 on:
-  schedule:
-    - cron: '0 14 * * 1-5'
-    - cron: '0 15 * * 0,6'
   workflow_dispatch:
     inputs:
       lookback_days:
