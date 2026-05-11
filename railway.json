@@ -1,0 +1,7 @@
+{
+  "$schema": "https://schema.railway.app/railway.json",
+  "deploy": {
+    "startCommand": "python reddit_brand_monitor.py",
+    "cronSchedule": "0 14 * * *"
+  }
+}
