@@ -13,10 +13,19 @@ Environment variables required:
 """
 
 import os
+import re
+import html
 import json
 import time
 import requests
 from datetime import datetime, timedelta, timezone
+
+def _clean(text):
+    """Strip HTML tags and decode entities to plain text."""
+    text = html.unescape(text or "")
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 SUBREDDIT  = "MissouriMedical"
 BASE_URL   = "https://www.reddit.com"
@@ -56,8 +65,8 @@ def _rss_entries_to_items(entries, item_type):
         author = (author_el.findtext(f"{{{ATOM}}}name") or "[deleted]").replace("/u/", "") if author_el is not None else "[deleted]"
         link_el = entry.find(f"{{{ATOM}}}link")
         link = (link_el.get("href") or "") if link_el is not None else ""
-        title = entry.findtext(f"{{{ATOM}}}title") or ""
-        content = entry.findtext(f"{{{ATOM}}}content") or ""
+        title = _clean(entry.findtext(f"{{{ATOM}}}title") or "")
+        content = _clean(entry.findtext(f"{{{ATOM}}}content") or "")
         raw_id = (entry.findtext(f"{{{ATOM}}}id") or link or "").rstrip("/")
         parts = raw_id.rsplit("/")
         uid = parts[-2] if len(parts) >= 2 else (parts[0] if parts else "")
